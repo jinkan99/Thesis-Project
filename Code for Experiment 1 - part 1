@@ -1,0 +1,55 @@
+import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.mixture import GaussianMixture
+from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+train_df = pd.read_csv('C:/Users/ASUS/Desktop/LJMU masters/research papers explored/datasets/experiments/dummy code/train_payload.csv')
+test_df = pd.read_csv('C:/Users/ASUS/Desktop/LJMU masters/research papers explored/datasets/experiments/dummy code/test_payload.csv')
+tfidf_vectorizer = TfidfVectorizer()
+tfidf_matrix_train = tfidf_vectorizer.fit_transform(train_df['payload'])
+best_bic = np.inf
+best_num_components = 1
+for num_components in range(1, 11):  
+    gmm = GaussianMixture(n_components=num_components, random_state=42)
+    gmm.fit(tfidf_matrix_train.toarray())
+    bic = gmm.bic(tfidf_matrix_train.toarray())
+    if bic < best_bic:
+        best_bic = bic
+        best_num_components = num_components
+gmm = GaussianMixture(n_components=best_num_components, random_state=42)
+gmm.fit(tfidf_matrix_train.toarray())
+tfidf_matrix_test = tfidf_vectorizer.transform(test_df['payload'])
+threshold = 0.3
+anomalies_probabilities = gmm.score_samples(tfidf_matrix_test.toarray())
+normal_indices = np.where(anomalies_probabilities > np.percentile(anomalies_probabilities, threshold * 100))[0]
+anomalies_indices = np.where(anomalies_probabilities < np.percentile(anomalies_probabilities, threshold * 100))[0]
+anomalies_indices = np.concatenate((anomalies_indices, normal_indices))
+anomalies = test_df.iloc[anomalies_indices]
+plt.figure(figsize=(10, 6))
+min_length = min(len(anomalies.index), len(anomalies_probabilities))
+sns.scatterplot(x=anomalies.index[:min_length], y=anomalies_probabilities[:min_length], hue=anomalies['label'], palette={'norm': 'blue', 'anom': 'red'})
+plt.axhline(y=np.percentile(anomalies_probabilities, threshold * 100), color='green', linestyle='--', label=f'Threshold: {threshold}')
+plt.xlabel('Index')
+plt.ylabel('Anomaly Probability')
+plt.title('Scatter Plot of Anomalies using GMM')
+plt.legend()
+plt.show()
+true_labels = test_df['label']
+predicted_labels = np.full_like(true_labels, 'norm', dtype=object)
+predicted_labels[anomalies_indices] = 'anom'
+true_positives = np.sum((true_labels == 'anom') & (predicted_labels == 'anom'))
+false_positives = np.sum((true_labels == 'norm') & (predicted_labels == 'anom'))
+true_negatives = np.sum((true_labels == 'norm') & (predicted_labels == 'norm'))
+false_negatives = np.sum((true_labels == 'anom') & (predicted_labels == 'norm'))
+precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) != 0 else 0
+recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) != 0 else 0
+f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) != 0 else 0
+conf_matrix = confusion_matrix(predicted_labels, true_labels)
+plt.figure(figsize=(8, 6))
+sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues', xticklabels=['Anomaly', 'Normal'], yticklabels=['Anomaly', 'Normal'])
+plt.xlabel('True')
+plt.ylabel('Predicted')
+plt.title('Confusion Matrix')
+plt.show()
